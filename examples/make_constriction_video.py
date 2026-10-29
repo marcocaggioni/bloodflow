@@ -25,6 +25,7 @@ from bloodflow.constriction import (
     Constriction,
     _step_constriction,
     init_positions_constriction,
+    init_positions_grid,
 )
 from bloodflow.core import Params
 
@@ -78,6 +79,8 @@ def main():
     ap.add_argument("--out", default="constriction-video.mp4")
     ap.add_argument("--fps", type=int, default=25)
     ap.add_argument("--seconds", type=float, default=12.0)
+    ap.add_argument("--init", choices=["random", "grid"], default="random")
+    ap.add_argument("--equil-steps", type=int, default=3000)
     args = ap.parse_args()
 
     a, H_main, H_throat, L, phi = 1.0, 50.0, 10.0, 100.0, 0.25
@@ -93,16 +96,23 @@ def main():
                 kappa=kappa, kT=0.0, dt=dt, seed=7)
     p_off = Params(eps=0.0, **base)
     p_on = Params(eps=1.28, **base)
-    print(f"N={n}  throat={H_throat} (5 diameters)  "
-          f"Mason main={p_on.mason_number():.1f}")
-
-    rng = np.random.default_rng(7)
-    pos_off = init_positions_constriction(p_off, constr, rng)
+    if args.init == "grid":
+        pos_off = init_positions_grid(p_off, constr)
+        n = len(pos_off)
+        base["N"] = n
+        p_off = Params(eps=0.0, **base)
+        p_on = Params(eps=1.28, **base)
+    else:
+        rng = np.random.default_rng(7)
+        pos_off = init_positions_constriction(p_off, constr, rng)
     pos_on = pos_off.copy()
+    print(f"init={args.init}  N={n}  throat={H_throat} (5 diameters)  "
+          f"Mason main={p_on.mason_number():.1f}")
     rng_off = np.random.default_rng(7)
     rng_on = np.random.default_rng(7)
-    # Equilibration, as in the analysis runs.
-    for _ in range(3000):
+    # Equilibration, as in the analysis runs (skipped for a grid start
+    # so the video opens on the uniform lattice itself).
+    for _ in range(args.equil_steps):
         _step_constriction(pos_off, p_off, constr, rng_off)
         _step_constriction(pos_on, p_on, constr, rng_on)
 
