@@ -34,6 +34,8 @@ class Params:
     kT: float = 0.0       # thermal energy (0 = deterministic)
     dt: float = 0.01      # time step
     seed: int = 0
+    pulse_amp: float = 0.0    # pulsation amplitude (0 = steady flow)
+    pulse_period: float = 100.0  # pulsation period, in time units
 
     # Derived quantities, filled in by __post_init__.
     zeta: float = field(init=False)
@@ -41,7 +43,9 @@ class Params:
     wca_cut: float = field(init=False)
     morse_cut: float = field(init=False)
     cell: float = field(init=False)
-    gamma_w: float = field(init=False)  # wall shear rate 4*Umax/H
+    gamma_w: float = field(init=False)  # MEAN wall shear rate 4*Umax/H
+        # (with pulsation, the instantaneous wall shear oscillates around
+        # this value; mason_number() likewise reports the mean-Ma case)
 
     def __post_init__(self):
         self.zeta = 6.0 * np.pi * self.eta * self.a
@@ -62,10 +66,26 @@ class Params:
         )
 
 
-def poiseuille_velocity(y, p):
-    """Imposed Poiseuille profile U(y), zero at both walls."""
+def pulsatile_umax(p, t):
+    """Centreline velocity at time t: Umax * (1 + amp*sin(2*pi*t/T)).
+
+    With pulse_amp = 0 this is exactly p.Umax (steady flow).
+    """
+    if p.pulse_amp == 0.0:
+        return p.Umax
+    return p.Umax * (1.0 + p.pulse_amp * np.sin(2.0 * np.pi * t / p.pulse_period))
+
+
+def poiseuille_velocity(y, p, umax=None):
+    """Imposed Poiseuille profile U(y), zero at both walls.
+
+    umax overrides p.Umax (used for the pulsatile instantaneous value);
+    with umax=None this is the original steady profile.
+    """
+    if umax is None:
+        umax = p.Umax
     s = y / p.H
-    return 4.0 * p.Umax * s * (1.0 - s)
+    return 4.0 * umax * s * (1.0 - s)
 
 
 def _padded_cell_grid(pos, p):
@@ -203,9 +223,18 @@ def init_positions(p, rng):
     return pos
 
 
-def _step(pos, p, rng, noise_std):
+def _step(pos, p, rng, noise_std, t=None):
+    """Advance one time step. t is the current time in time units.
+
+    With t=None the step uses the steady profile p.Umax exactly as
+    before (bit-identical to the pre-pulsation code); with t given, the
+    profile uses the instantaneous pulsatile centreline velocity.
+    """
     F = compute_forces(pos, p)
-    adv = poiseuille_velocity(pos[:, 1], p)
+    if t is None:
+        adv = poiseuille_velocity(pos[:, 1], p)
+    else:
+        adv = poiseuille_velocity(pos[:, 1], p, umax=pulsatile_umax(p, t))
     dx = (adv + F[:, 0] / p.zeta) * p.dt
     dy = (F[:, 1] / p.zeta) * p.dt
     if noise_std > 0.0:
