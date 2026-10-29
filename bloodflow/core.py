@@ -95,8 +95,8 @@ def _padded_cell_grid(pos, p):
     return P.reshape(nx, ny, maxc), nx, ny, maxc
 
 
-def compute_forces(pos, p):
-    """Pair (WCA + Morse) + wall forces. Returns an (N, 2) array."""
+def compute_pair_forces(pos, p):
+    """Pair (WCA + Morse) forces only. Returns an (N, 2) array."""
     N = pos.shape[0]
     F = np.zeros((N, 2))
     if N == 0:
@@ -155,6 +155,12 @@ def compute_forces(pos, p):
         np.add.at(F[:, 1], i_flat, fy[valid])
         np.add.at(F[:, 1], j_flat, -fy[valid])
 
+    return F
+
+
+def compute_forces(pos, p):
+    """Pair (WCA + Morse) + flat-wall forces. Returns an (N, 2) array."""
+    F = compute_pair_forces(pos, p)
     # Wall forces (WCA against y = 0 and y = H).
     for d, sign in ((pos[:, 1], 1.0), (p.H - pos[:, 1], -1.0)):
         mask = (d < potentials._WCA_C * p.a) & (d > 0.0)
