@@ -123,6 +123,58 @@ def init_positions_constriction(p, constr, rng):
     return pos
 
 
+def init_positions_grid(p, constr, target_n=None):
+    """Hexagonal-lattice starting positions (a uniform distribution).
+
+    Points of a hex lattice covering the bounding box are kept when they
+    lie inside the local channel bounds with a 1.3a margin. The lattice
+    spacing is tuned so the kept count lands as close as possible to
+    target_n (default p.N); the caller should use len(positions) as the
+    actual particle count, since an exact match is not always possible.
+    The x-spacing divides L exactly, so the lattice is seamless across
+    the periodic x boundary. Deterministic: no randomness, so both cases
+    start identically, the lattice spacing (~3a) exceeds the cluster
+    cutoff (so the video opens with all singletons), and aggregation
+    must develop from the lattice rather than from random initial
+    proximity.
+    """
+    target = target_n or p.N
+    xs_grid = np.linspace(0.0, p.L, 2001)
+    area = float(np.mean(constr.width(xs_grid))) * p.L
+    s0 = float(np.sqrt(area / target))
+    n_cols = max(1, int(round(p.L / s0)))
+    best = None
+    seen = set()
+    for _ in range(40):
+        if n_cols in seen or n_cols < 1:
+            break
+        seen.add(n_cols)
+        pts = _hex_lattice_points(p.L / n_cols, p, constr)
+        if best is None or abs(len(pts) - target) < abs(len(best) - target):
+            best = pts
+        if len(pts) == target:
+            break
+        n_cols += 1 if len(pts) < target else -1
+    return best
+
+
+def _hex_lattice_points(s_x, p, constr):
+    row_h = s_x * np.sqrt(3.0) / 2.0
+    n_rows = int(np.floor(p.H / row_h)) + 1
+    y0 = 0.5 * p.H - 0.5 * (n_rows - 1) * row_h
+    n_cols = int(round(p.L / s_x))
+    pts = []
+    for r in range(n_rows):
+        y = y0 + r * row_h
+        x_off = 0.5 * s_x if r % 2 else 0.0
+        for c in range(n_cols):
+            x = (c * s_x + x_off) % p.L
+            if constr.y_lo(x) + 1.3 * p.a <= y <= constr.y_hi(x) - 1.3 * p.a:
+                pts.append((x, y))
+    pts.sort()
+    return np.array(pts)
+
+
 class ConstrictionResult:
     def __init__(self, p, transit, wall_time, passage, final_pos,
                  total_time, n_repairs=0):
