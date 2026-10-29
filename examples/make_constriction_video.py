@@ -81,11 +81,15 @@ def main():
     ap.add_argument("--seconds", type=float, default=12.0)
     ap.add_argument("--init", choices=["random", "grid"], default="random")
     ap.add_argument("--equil-steps", type=int, default=3000)
+    ap.add_argument("--L", type=float, default=100.0,
+                    help="channel period in x")
+    ap.add_argument("--xc", type=float, default=50.0,
+                    help="throat centre (kept fixed when extending L)")
     args = ap.parse_args()
 
-    a, H_main, H_throat, L, phi = 1.0, 50.0, 10.0, 100.0, 0.25
+    a, H_main, H_throat, L, phi = 1.0, 50.0, 10.0, args.L, 0.25
     constr = Constriction(H_main=H_main, H_throat=H_throat, L=L,
-                          xc=50.0, core_half=10.0, ramp=15.0)
+                          xc=args.xc, core_half=10.0, ramp=15.0)
     n = int(phi * L * H_main / (np.pi * a * a))
     Umax, dt, kappa = 2.0, 0.02, 2.0
     n_steps = 6000
@@ -118,7 +122,8 @@ def main():
 
     xs = np.linspace(0, L, 400)
     y_lo, y_hi = constr.y_lo(xs), constr.y_hi(xs)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.4), dpi=100)
+    fig, axes = plt.subplots(1, 2,
+                             figsize=(12.0 * L / 100.0, 5.4), dpi=100)
     fig.subplots_adjust(left=0.04, right=0.98, top=0.86, bottom=0.10,
                         wspace=0.08)
     titles = ["No attraction (eps = 0)", "Strong attraction (eps = 1.28)"]
