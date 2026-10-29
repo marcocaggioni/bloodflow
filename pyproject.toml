@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bloodflow"
+version = "0.1.0"
+description = "Toy model: aggregation and residence time of rigid spheres in Poiseuille flow"
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+
+[tool.setuptools.packages.find]
+include = ["bloodflow*"]
