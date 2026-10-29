@@ -25,15 +25,17 @@ Outputs (besides the video):
 
 Usage:
     python3 examples/stacked_attraction_video.py [--out FILE]
-Requires matplotlib and ffmpeg on PATH. Frames go to a temp dir.
+Requires matplotlib and ffmpeg on PATH. Frames stream into ffmpeg;
+no temp files (an earlier version wrote frames to /tmp, a 512 MB
+tmpfs, and died on "No space left on device").
 """
 
 import argparse
 import csv
+import io
 import os
 import subprocess
 import sys
-import tempfile
 
 import numpy as np
 
@@ -177,7 +179,15 @@ def main():
         scats.append(ax.scatter([], [], s=size, edgecolors="none"))
 
     cutoff = 2.0 * a + 0.5 / kappa
-    tmp = tempfile.mkdtemp(prefix="stacked_frames_")
+    # Stream frames straight into ffmpeg (image2pipe): writing them to
+    # /tmp killed the first full run, since /tmp is a 512 MB tmpfs.
+    ffmpeg = subprocess.Popen(
+        ["ffmpeg", "-y", "-framerate", str(args.fps),
+         "-f", "image2pipe", "-vcodec", "png", "-i", "-",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", args.out],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     frame = 0
     for step in range(1, args.steps + 1):
         for k, p in enumerate(params):
@@ -195,15 +205,15 @@ def main():
             f"Straight channel, t = {step * dt:.0f}  |  grey = single or in"
             " a group of 6 or fewer, colour = in a group of 7+"
         )
-        fig.savefig(os.path.join(tmp, f"frame_{frame:04d}.png"))
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        ffmpeg.stdin.write(buf.getvalue())
         frame += 1
+    ffmpeg.stdin.close()
+    ffmpeg.wait()
+    if ffmpeg.returncode != 0:
+        raise RuntimeError(f"ffmpeg exited with code {ffmpeg.returncode}")
     print(f"rendered {frame} frames")
-    subprocess.run(
-        ["ffmpeg", "-y", "-framerate", str(args.fps), "-i",
-         os.path.join(tmp, "frame_%04d.png"), "-c:v", "libx264",
-         "-pix_fmt", "yuv420p", "-crf", "20", args.out],
-        check=True, capture_output=True, text=True,
-    )
     print("wrote", args.out, os.path.getsize(args.out), "bytes")
 
     # Age analysis at the end of the run.
