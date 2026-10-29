@@ -57,11 +57,13 @@ def main():
     ap.add_argument("--no-plot", action="store_true")
     ap.add_argument("--steps", type=int, default=30000)
     ap.add_argument("--equil-steps", type=int, default=3000)
+    ap.add_argument("--L", type=float, default=100.0)
+    ap.add_argument("--xc", type=float, default=50.0)
     args = ap.parse_args()
 
-    a, H_main, H_throat, L, phi = 1.0, 50.0, 10.0, 100.0, 0.25
+    a, H_main, H_throat, L, phi = 1.0, 50.0, 10.0, args.L, 0.25
     constr = Constriction(H_main=H_main, H_throat=H_throat, L=L,
-                          xc=50.0, core_half=10.0, ramp=15.0)
+                          xc=args.xc, core_half=10.0, ramp=15.0)
     n = int(phi * L * H_main / (np.pi * a * a))
     xs_grid = np.linspace(0, L, 2001)
     h_avg = float(np.mean(constr.width(xs_grid)))
