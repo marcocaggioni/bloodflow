@@ -13,7 +13,12 @@ each generation (level 0 = trunk ... 3 = terminals), and per-frame
 level populations.
 
 Modes:
-  video (default): stream frames to ffmpeg via image2pipe.
+  video (default): render each frame to a PNG and checkpoint the
+      full state after every frame, then encode the mp4 from the
+      PNGs at the end. A killed run restarts with --resume from the
+      latest checkpoint instead of from scratch (the first full run
+      was killed by a VM restart ~1.5 h in and its ffmpeg-piped mp4
+      was unrecoverable, which is why the pipe is gone).
   pilot (--snapshots DIR): short run, phase snapshots plus checks
       (wall penetration, stuck particles, wrap counts, speed).
 
@@ -24,8 +29,9 @@ Requires matplotlib and ffmpeg on PATH.
 """
 
 import argparse
-import io
+import glob
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -98,6 +104,12 @@ def main():
     ap.add_argument("--seconds", type=float, default=24.0)
     ap.add_argument("--snapshots", default=None,
                     help="pilot mode: save snapshots + checks to DIR")
+    ap.add_argument("--frames-dir", default=None,
+                    help="video mode: directory for per-frame PNGs "
+                         "(default: network_frames next to this script)")
+    ap.add_argument("--resume", action="store_true",
+                    help="video mode: resume from the latest checkpoint "
+                         "in --frames-dir instead of starting fresh")
     args = ap.parse_args()
 
     net = network.build_network()
@@ -223,20 +235,55 @@ def main():
                   f"stuck(<1 unit in 50)={stuck} -> {path}", flush=True)
         el = time.time() - t_start
         print(f"pilot done: {n_steps} steps in {el:.0f}s "
-              f"({n_steps / el:.1f} steps/s/panel); full 40000-step run "
-              f"projects to ~{2 * 40000 / (n_steps / el) / 60:.0f} min")
+              f"({n_steps / el:.1f} dual-panel steps/s); full 40000-step "
+              f"run projects to ~{40000 / (n_steps / el) / 60:.0f} min "
+              f"of stepping plus frame-rendering overhead")
         return
 
-    proc = subprocess.Popen(
-        ["ffmpeg", "-y", "-f", "image2pipe", "-vcodec", "png",
-         "-r", str(args.fps), "-i", "-", "-c:v", "libx264",
-         "-pix_fmt", "yuv420p", "-crf", "20", args.out],
-        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    frame = 0
-    rows = []
-    for step in range(1, n_steps + 1):
+    # Video mode: render each frame to a PNG and checkpoint the full
+    # state after every frame (atomic replace, so a kill mid-write
+    # cannot corrupt the checkpoint). The mp4 is encoded from the
+    # PNGs only after the last frame; frames + checkpoint are then
+    # deleted. A later --resume run picks up at the checkpointed
+    # frame (any PNGs past it are dropped and re-rendered).
+    frames_dir = args.frames_dir or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "network_frames")
+    ckpt_path = os.path.join(frames_dir, "ckpt.npz")
+    if args.resume and os.path.exists(ckpt_path):
+        ck = np.load(ckpt_path)
+        step0 = int(ck["step"])
+        frame = int(ck["frame"])
+        pos_off = ck["pos_off"]
+        pos_on = ck["pos_on"]
+        wraps = [int(ck["wraps"][0]), int(ck["wraps"][1])]
+        level_now = [ck["level_now_off"], ck["level_now_on"]]
+        level_since = [ck["level_since_off"], ck["level_since_on"]]
+        level_dur = [{lv: ck[f"level_dur_off_{lv}"].tolist()
+                      for lv in range(4)},
+                     {lv: ck[f"level_dur_on_{lv}"].tolist()
+                      for lv in range(4)}]
+        loop_start = [ck["loop_start_off"], ck["loop_start_on"]]
+        loop_times = [ck["loop_times_off"].tolist(),
+                      ck["loop_times_on"].tolist()]
+        rows = [(float(r[0]), int(r[1]), int(r[2]),
+                 *[int(v) for v in r[3:]])
+                for r in ck["rows"]] if len(ck["rows"]) else []
+        for path in glob.glob(os.path.join(frames_dir, "frame_*.png")):
+            try:
+                if int(path[-9:-4]) > frame:
+                    os.remove(path)
+            except ValueError:
+                pass
+        print(f"resuming from frame {frame}/{n_frames} "
+              f"(step {step0}, t={step0 * dt:.1f})", flush=True)
+    else:
+        os.makedirs(frames_dir, exist_ok=True)
+        for path in glob.glob(os.path.join(frames_dir, "frame_*.png")):
+            os.remove(path)
+        if os.path.exists(ckpt_path):
+            os.remove(ckpt_path)
+        step0, frame, rows = 0, 0, []
+    for step in range(step0 + 1, n_steps + 1):
         _, w0 = network.step_network(pos_off, p_off, net, rng_off, 0.0)
         _, w1 = network.step_network(pos_on, p_on, net, rng_on, 0.0)
         wraps[0] += int(w0.sum())
@@ -253,17 +300,42 @@ def main():
         lv0 = np.bincount(level_now[0], minlength=4)
         lv1 = np.bincount(level_now[1], minlength=4)
         rows.append((t, wraps[0], wraps[1], *lv0.tolist(), *lv1.tolist()))
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png")
-        proc.stdin.write(buf.getvalue())
         frame += 1
+        fig.savefig(os.path.join(frames_dir, f"frame_{frame:04d}.png"))
+        tmp = ckpt_path + ".tmp"
+        # Write through a file object: np.savez appends ".npz" to a
+        # plain filename, which would break the atomic replace below.
+        with open(tmp, "wb") as fh:
+            np.savez(fh, step=step, frame=frame, pos_off=pos_off,
+                     pos_on=pos_on, wraps=np.array(wraps),
+                     level_now_off=level_now[0], level_now_on=level_now[1],
+                     level_since_off=level_since[0],
+                     level_since_on=level_since[1],
+                     **{f"level_dur_off_{lv}": np.array(level_dur[0][lv])
+                        for lv in range(4)},
+                     **{f"level_dur_on_{lv}": np.array(level_dur[1][lv])
+                        for lv in range(4)},
+                     loop_start_off=loop_start[0],
+                     loop_start_on=loop_start[1],
+                     loop_times_off=np.array(loop_times[0]),
+                     loop_times_on=np.array(loop_times[1]),
+                     rows=np.array(rows, dtype=float))
+        os.replace(tmp, ckpt_path)
         if frame % 100 == 0:
             print(f"  frame {frame}/{n_frames} (t={t:.0f})", flush=True)
-    proc.stdin.close()
-    proc.wait()
+    enc = subprocess.run(
+        ["ffmpeg", "-y", "-framerate", str(args.fps), "-i",
+         os.path.join(frames_dir, "frame_%04d.png"), "-c:v", "libx264",
+         "-pix_fmt", "yuv420p", "-crf", "20", args.out],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     el = time.time() - t_start
+    if enc.returncode != 0 or not os.path.exists(args.out):
+        print(f"ENCODING FAILED (ffmpeg exit {enc.returncode}); frames "
+              f"kept in {frames_dir}; rerun with --resume after fixing")
+        return
     print(f"wrote {args.out} ({frame} frames, {el:.0f}s)",
           os.path.getsize(args.out), "bytes")
+    shutil.rmtree(frames_dir)
     with open("network_frame_stats.csv", "w") as f:
         f.write("t,wraps_off,wraps_on,lv0_off,lv1_off,lv2_off,lv3_off,"
                 "lv0_on,lv1_on,lv2_on,lv3_on\n")
