@@ -88,16 +88,20 @@ def poiseuille_velocity(y, p, umax=None):
     return 4.0 * umax * s * (1.0 - s)
 
 
-def _padded_cell_grid(pos, p):
+def _padded_cell_grid(pos, p, wrap_x=True):
     """Bin particles into a linked-cell grid.
 
     Returns (Pgrid, nx, ny, maxc) where Pgrid[ix, iy, slot] holds the
-    particle index in that cell/slot, or -1 if empty. x is periodic, y is
-    clipped (walls confine the particles).
+    particle index in that cell/slot, or -1 if empty. With wrap_x the x
+    direction is periodic (ix modulo nx); without it, x is clipped like
+    y (walls confine the particles).
     """
     nx = max(1, int(np.ceil(p.L / p.cell)))
     ny = max(1, int(np.ceil(p.H / p.cell)))
-    ix = (np.floor(pos[:, 0] / p.cell).astype(int)) % nx
+    if wrap_x:
+        ix = (np.floor(pos[:, 0] / p.cell).astype(int)) % nx
+    else:
+        ix = np.clip(np.floor(pos[:, 0] / p.cell).astype(int), 0, nx - 1)
     iy = np.clip(np.floor(pos[:, 1] / p.cell).astype(int), 0, ny - 1)
     # Row-major flat id, consistent with the reshape to (nx, ny, maxc) below.
     cid = ix * ny + iy
@@ -115,13 +119,18 @@ def _padded_cell_grid(pos, p):
     return P.reshape(nx, ny, maxc), nx, ny, maxc
 
 
-def compute_pair_forces(pos, p):
-    """Pair (WCA + Morse) forces only. Returns an (N, 2) array."""
+def compute_pair_forces(pos, p, wrap_x=True):
+    """Pair (WCA + Morse) forces only. Returns an (N, 2) array.
+
+    With wrap_x=False, cells do not pair across the x edges and no
+    minimum image is applied in x (open/loop-network boundaries).
+    Default True reproduces the original periodic behaviour exactly.
+    """
     N = pos.shape[0]
     F = np.zeros((N, 2))
     if N == 0:
         return F
-    Pgrid, nx, ny, maxc = _padded_cell_grid(pos, p)
+    Pgrid, nx, ny, maxc = _padded_cell_grid(pos, p, wrap_x=wrap_x)
     if maxc == 0:
         return F
     slots = np.arange(maxc)
@@ -131,6 +140,13 @@ def compute_pair_forces(pos, p):
     # (0, 0) is the intra-cell case, handled with a slot mask.
     for dx_cell, dy_cell in ((0, 0), (1, 0), (0, 1), (1, 1), (-1, 1)):
         rolled = np.roll(Pgrid, shift=-dx_cell, axis=0)
+        if not wrap_x:
+            # Kill the wrapped edge: cells rolled in from the far side
+            # must not pair across the boundary.
+            if dx_cell == 1:
+                rolled[-1, :, :] = -1
+            elif dx_cell == -1:
+                rolled[0, :, :] = -1
         padded = np.full((nx, ny + 2, maxc), -1, dtype=int)
         padded[:, 1 : ny + 1, :] = rolled
         Q = padded[:, 1 + dy_cell : 1 + dy_cell + ny, :]
@@ -144,7 +160,8 @@ def compute_pair_forces(pos, p):
         i_idx = np.clip(I, 0, N - 1)
         j_idx = np.clip(J, 0, N - 1)
         dx = pos[i_idx, 0] - pos[j_idx, 0]
-        dx -= p.L * np.round(dx / p.L)  # minimum image in x
+        if wrap_x:
+            dx -= p.L * np.round(dx / p.L)  # minimum image in x
         dy = pos[i_idx, 1] - pos[j_idx, 1]
         r2 = dx * dx + dy * dy
         valid &= (r2 < cut2) & (r2 > 0.0)
