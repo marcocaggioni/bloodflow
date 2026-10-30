@@ -49,8 +49,15 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 
 
-def cluster_colors_fast(pos, cutoff):
-    """Grid-based clustering; singletons grey, clusters tab colours."""
+def cluster_colors_fast(pos, cutoff, min_size=2, accent=None):
+    """Grid-based clustering.
+
+    Clusters of at least min_size particles are coloured; smaller
+    ones stay grey. With accent=None the old rainbow-by-size
+    colouring is used (colours are re-ranked every frame, which
+    flickers as clusters merge and split); with accent set, every
+    qualifying cluster gets that one colour, so nothing switches.
+    """
     n = pos.shape[0]
     cell = cutoff
     grid = {}
@@ -82,8 +89,13 @@ def cluster_colors_fast(pos, cutoff):
     labels = np.array([find(i) for i in range(n)])
     _, counts = np.unique(labels, return_counts=True)
     size_of = {lab: int(c) for lab, c in zip(np.unique(labels), counts)}
+    grey = (0.72, 0.72, 0.72, 1.0)
+    if accent is not None:
+        acc = mcolors.to_rgba(accent)
+        return np.array([acc if size_of[lab] >= min_size else grey
+                         for lab in labels])
     ranked = sorted(
-        (lab for lab in np.unique(labels) if size_of[lab] >= 2),
+        (lab for lab in np.unique(labels) if size_of[lab] >= min_size),
         key=lambda lab: -size_of[lab],
     )
     palette = list(mcolors.TABLEAU_COLORS.values()) + list(
@@ -92,7 +104,6 @@ def cluster_colors_fast(pos, cutoff):
     col_of = {}
     for k, lab in enumerate(ranked):
         col_of[lab] = mcolors.to_rgba(palette[k % len(palette)])
-    grey = (0.72, 0.72, 0.72, 1.0)
     return np.array([col_of.get(lab, grey) for lab in labels])
 
 
@@ -110,6 +121,20 @@ def main():
     ap.add_argument("--resume", action="store_true",
                     help="video mode: resume from the latest checkpoint "
                          "in --frames-dir instead of starting fresh")
+    ap.add_argument("--dpi", type=int, default=100,
+                    help="video mode: figure DPI (1400x750 at 100, "
+                         "2800x1500 at 200)")
+    ap.add_argument("--cluster-min", type=int, default=2,
+                    help="video mode: smallest cluster size that gets a "
+                         "colour (smaller clusters stay grey)")
+    ap.add_argument("--accent", default=None,
+                    help="video mode: single colour for clusters >= "
+                         "--cluster-min (e.g. '#d62728'); omit for the "
+                         "old rainbow-by-size colouring")
+    ap.add_argument("--save-traj", default=None,
+                    help="video mode: save per-frame positions to this "
+                         ".npz file, so future re-renders need no "
+                         "re-stepping")
     args = ap.parse_args()
 
     net = network.build_network()
@@ -133,12 +158,12 @@ def main():
     rng_off = np.random.default_rng(7)
     rng_on = np.random.default_rng(7)
 
-    fig, axes = plt.subplots(2, 1, figsize=(14, 7.5), dpi=100)
+    fig, axes = plt.subplots(2, 1, figsize=(14, 7.5), dpi=args.dpi)
     fig.subplots_adjust(left=0.04, right=0.98, top=0.90, bottom=0.06,
                         hspace=0.35)
     # Channel background: capsules as thick round-capped lines. Points
     # per data unit from the axes geometry (no draw needed first).
-    px_per_unit = 0.94 * 14.0 * 100.0 / net.L_total
+    px_per_unit = 0.94 * 14.0 * args.dpi / net.L_total
     lw_per_width = px_per_unit * 72.0 / 100.0
     for ax in axes:
         ax.set_xlim(0, net.L_total)
@@ -192,7 +217,8 @@ def main():
         t = step * dt
         for k, pos in enumerate((pos_off, pos_on)):
             scats[k].set_offsets(pos)
-            scats[k].set_color(cluster_colors_fast(pos, cutoff))
+            scats[k].set_color(cluster_colors_fast(
+                pos, cutoff, args.cluster_min, args.accent))
         time_text.set_text(
             f"Branching network, t = {t:.1f}  |  loops completed: "
             f"{wraps[0]} (no attraction) / {wraps[1]} (attraction)  |  "
@@ -270,10 +296,11 @@ def main():
                 for r in ck["rows"]] if len(ck["rows"]) else []
         for path in glob.glob(os.path.join(frames_dir, "frame_*.png")):
             try:
-                if int(path[-9:-4]) > frame:
-                    os.remove(path)
+                num = int(os.path.basename(path).split("_")[-1].split(".")[0])
             except ValueError:
-                pass
+                continue
+            if num > frame:
+                os.remove(path)
         print(f"resuming from frame {frame}/{n_frames} "
               f"(step {step0}, t={step0 * dt:.1f})", flush=True)
     else:
@@ -283,6 +310,21 @@ def main():
         if os.path.exists(ckpt_path):
             os.remove(ckpt_path)
         step0, frame, rows = 0, 0, []
+    # Optional trajectory dump: per-frame positions saved alongside
+    # the frames (same resume rules: files past the checkpoint are
+    # dropped), stacked into one .npz at the end. With this file, any
+    # future re-render needs no re-stepping.
+    traj_dir = None
+    if args.save_traj is not None:
+        traj_dir = args.save_traj + "_frames"
+        os.makedirs(traj_dir, exist_ok=True)
+        for path in glob.glob(os.path.join(traj_dir, "pos_*.npy")):
+            try:
+                num = int(os.path.basename(path).split("_")[-1].split(".")[0])
+            except ValueError:
+                continue
+            if not args.resume or num > frame:
+                os.remove(path)
     for step in range(step0 + 1, n_steps + 1):
         _, w0 = network.step_network(pos_off, p_off, net, rng_off, 0.0)
         _, w1 = network.step_network(pos_on, p_on, net, rng_on, 0.0)
@@ -302,6 +344,11 @@ def main():
         rows.append((t, wraps[0], wraps[1], *lv0.tolist(), *lv1.tolist()))
         frame += 1
         fig.savefig(os.path.join(frames_dir, f"frame_{frame:04d}.png"))
+        if traj_dir is not None:
+            np.save(os.path.join(traj_dir, f"pos_off_{frame:04d}.npy"),
+                    pos_off)
+            np.save(os.path.join(traj_dir, f"pos_on_{frame:04d}.npy"),
+                    pos_on)
         tmp = ckpt_path + ".tmp"
         # Write through a file object: np.savez appends ".npz" to a
         # plain filename, which would break the atomic replace below.
@@ -336,6 +383,20 @@ def main():
     print(f"wrote {args.out} ({frame} frames, {el:.0f}s)",
           os.path.getsize(args.out), "bytes")
     shutil.rmtree(frames_dir)
+    if traj_dir is not None:
+        off_files = sorted(glob.glob(os.path.join(traj_dir, "pos_off_*.npy")))
+        on_files = sorted(glob.glob(os.path.join(traj_dir, "pos_on_*.npy")))
+        if len(off_files) == frame and len(on_files) == frame:
+            pos_off_stack = np.stack([np.load(f) for f in off_files])
+            pos_on_stack = np.stack([np.load(f) for f in on_files])
+            np.savez(args.save_traj, pos_off=pos_off_stack,
+                     pos_on=pos_on_stack)
+            print(f"saved trajectory {args.save_traj} "
+                  f"({pos_off_stack.shape})")
+            shutil.rmtree(traj_dir)
+        else:
+            print(f"trajectory incomplete ({len(off_files)}/{frame} "
+                  f"frames); per-frame files kept in {traj_dir}")
     with open("network_frame_stats.csv", "w") as f:
         f.write("t,wraps_off,wraps_on,lv0_off,lv1_off,lv2_off,lv3_off,"
                 "lv0_on,lv1_on,lv2_on,lv3_on\n")
