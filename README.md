@@ -101,10 +101,13 @@ completed a transit (the rest are censored at the end of the run).
 
 The demo notebook can encode its own MP4 without leaving the browser.
 JupyterLite ships no ffmpeg binary, so the export cells at the end of
-`demo.ipynb` load [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) —
-FFmpeg compiled to WebAssembly — from a CDN and drive it from Python
-through Pyodide's JavaScript bridge. The first run downloads ~25 MB of
-WASM; the browser caches it afterwards. The single-threaded core is used
+`demo.ipynb` use [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) —
+FFmpeg compiled to WebAssembly — vendored in this repo under
+`vendor/ffmpeg/` and served from the same site as the notebook (no CDN;
+the CDN version failed live because the browser blocks the cross-origin
+worker file) and drive it from Python through Pyodide's JavaScript
+bridge. The first run downloads ~31 MB of WASM; the browser caches it
+afterwards. The single-threaded core is used
 on purpose: GitHub Pages sends no cross-origin-isolation headers, so the
 multi-threaded core cannot load here. Run the two cells (render frames,
 then encode): they render the eps = 2 run as 90 PNG frames (3 s at
@@ -137,6 +140,8 @@ examples/
   sweep_attraction.py
 tests/
   test_poiseuille.py
+vendor/ffmpeg/    ffmpeg.wasm 0.12.15 + single-threaded core 0.12.10,
+                  served same-origin for the in-browser MP4 export
 ```
 
 ## Deliberate limitations (roadmap, not bugs)
