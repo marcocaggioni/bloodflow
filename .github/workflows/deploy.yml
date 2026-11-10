@@ -32,7 +32,7 @@ jobs:
       - name: Stage content
         run: |
           mkdir -p content
-          cp -r bloodflow examples videos content/
+          cp -r bloodflow examples videos vendor content/
           cp README.md demo.ipynb content/
           rm -rf content/examples/__pycache__ content/bloodflow/__pycache__
       - name: Build the JupyterLite site
