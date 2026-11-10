@@ -97,6 +97,23 @@ completed a transit (the rest are censored at the end of the run).
 
 - [Pulsatile flow](videos/bloodflow-pulsatile.mp4) — sinusoidal pressure drop, no reversal: 12 beats at the same mean flow as the steady run, with a waveform strip marking beat phase and Mason number. The plug breathes but survives (phase-averaged cluster fraction ~0.92 at systole vs ~0.97 at diastole).
 
+## Export an MP4 in the browser
+
+The demo notebook can encode its own MP4 without leaving the browser.
+JupyterLite ships no ffmpeg binary, so the export cells at the end of
+`demo.ipynb` load [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) —
+FFmpeg compiled to WebAssembly — from a CDN and drive it from Python
+through Pyodide's JavaScript bridge. The first run downloads ~25 MB of
+WASM; the browser caches it afterwards. The single-threaded core is used
+on purpose: GitHub Pages sends no cross-origin-isolation headers, so the
+multi-threaded core cannot load here. Run the two cells (render frames,
+then encode): they render the eps = 2 run as 90 PNG frames (3 s at
+30 fps), encode them with libx264 (`-pix_fmt yuv420p`), and save
+`bloodflow-export.mp4` next to the notebook — it appears in the file
+browser (right-click → Download) and plays inline. The temporary frames
+are deleted from ffmpeg's in-memory filesystem after encoding; only the
+intermediates are cleared, the simulation data stays in the notebook.
+
 ## Run the validation test
 
 ```bash
