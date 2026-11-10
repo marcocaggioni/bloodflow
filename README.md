@@ -93,6 +93,10 @@ the mean near-wall residence time collapses (35 → 4), and clusters grow
 slower than 3x the mean; `compl` is the fraction of particles that
 completed a transit (the rest are censored at the end of the run).
 
+## Videos
+
+- [Pulsatile flow](videos/bloodflow-pulsatile.mp4) — sinusoidal pressure drop, no reversal: 12 beats at the same mean flow as the steady run, with a waveform strip marking beat phase and Mason number. The plug breathes but survives (phase-averaged cluster fraction ~0.92 at systole vs ~0.97 at diastole).
+
 ## Run the validation test
 
 ```bash
