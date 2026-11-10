@@ -23,7 +23,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install JupyterLite
-        run: pip install jupyterlite
+        # jupyter-server is required: `jupyter lite build --contents`
+        # uses it to index the content files (without it the build
+        # fails with "jupyter-server is not installed").
+        run: pip install jupyterlite jupyter-server
       - name: Stage content
         run: |
           mkdir -p content
