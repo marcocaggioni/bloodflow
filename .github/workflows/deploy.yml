@@ -26,7 +26,9 @@ jobs:
         # jupyter-server is required: `jupyter lite build --contents`
         # uses it to index the content files (without it the build
         # fails with "jupyter-server is not installed").
-        run: pip install jupyterlite jupyter-server
+        # jupyterlite-pyodide-kernel is the in-browser Python kernel:
+        # without it the site builds but offers no kernel at all.
+        run: pip install jupyterlite jupyterlite-pyodide-kernel jupyter-server
       - name: Stage content
         run: |
           mkdir -p content
