@@ -97,25 +97,42 @@ completed a transit (the rest are censored at the end of the run).
 
 - [Pulsatile flow](videos/bloodflow-pulsatile.mp4) — sinusoidal pressure drop, no reversal: 12 beats at the same mean flow as the steady run, with a waveform strip marking beat phase and Mason number. The plug breathes but survives (phase-averaged cluster fraction ~0.92 at systole vs ~0.97 at diastole).
 
+Notebook versions of all five video scripts live in [`examples/videos.ipynb`](examples/videos.ipynb): Poiseuille vs plug, constriction, pulsatile, the stacked attraction ladder, and the branching network. Each section renders its frames and encodes the MP4 in the browser (see below); the runs are trimmed relative to the scripts — fewer seconds, steps, or beats — so they finish in a few minutes in the browser, and each section says exactly how.
+
 ## Export an MP4 in the browser
 
-The demo notebook can encode its own MP4 without leaving the browser.
-JupyterLite ships no ffmpeg binary, so the export cells at the end of
-`demo.ipynb` use [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) —
-FFmpeg compiled to WebAssembly — vendored in this repo under
-`vendor/ffmpeg/` and served from the same site as the notebook (no CDN;
-the CDN version failed live because the browser blocks the cross-origin
-worker file) and drive it from Python through Pyodide's JavaScript
-bridge. The first run downloads ~31 MB of WASM; the browser caches it
-afterwards. The single-threaded core is used
-on purpose: GitHub Pages sends no cross-origin-isolation headers, so the
-multi-threaded core cannot load here. Run the two cells (render frames,
-then encode): they render the eps = 2 run as 90 PNG frames (3 s at
-30 fps), encode them with libx264 (`-pix_fmt yuv420p`), and save
-`bloodflow-export.mp4` next to the notebook — it appears in the file
-browser (right-click → Download) and plays inline. The temporary frames
-are deleted from ffmpeg's in-memory filesystem after encoding; only the
-intermediates are cleared, the simulation data stays in the notebook.
+The notebooks can encode their own MP4s without leaving the browser.
+JupyterLite ships no ffmpeg binary, so the export cells in `demo.ipynb`
+and the `export_mp4` helper in `examples/videos.ipynb` use
+[ffmpeg.wasm](https://ffmpegwasm.netlify.app/) — FFmpeg compiled to
+WebAssembly — vendored in this repo under `vendor/ffmpeg/` and served
+from the same site as the notebook (no CDN; the CDN version failed live
+because the browser blocks the cross-origin worker file), driven from
+Python through Pyodide's JavaScript bridge. The first run downloads
+~31 MB of WASM; the browser caches it afterwards, and in
+`examples/videos.ipynb` the loaded encoder is reused for all five
+videos. The single-threaded core is used on purpose: GitHub Pages sends
+no cross-origin-isolation headers, so the multi-threaded core cannot
+load here.
+
+In `demo.ipynb`, run the two cells (render frames, then encode): they
+render the eps = 2 run as 90 PNG frames (3 s at 30 fps), encode them
+with libx264 (`-pix_fmt yuv420p`), and save `bloodflow-export.mp4`
+next to the notebook — it appears in the file browser (right-click →
+Download) and plays inline. The temporary frames are deleted from
+ffmpeg's in-memory filesystem after encoding; only the intermediates
+are cleared, the simulation data stays in the notebook.
+
+Two things the export depends on, found the hard way:
+- The core must be the **ESM build** (`@ffmpeg/core` `dist/esm`).
+  The wrapper spawns a *module* worker, which has no `importScripts`,
+  so it falls back to importing the core as an ES module — and the UMD
+  build exports nothing, so `load()` hangs forever with no error.
+- Every Python value handed to ffmpeg's JS methods must cross with
+  `pyodide.ffi.to_js` first. Otherwise it arrives as a PyProxy, and
+  `postMessage` cannot clone a PyProxy into ffmpeg's worker
+  (`DataCloneError`). That covers the PNG bytes in `writeFile` and the
+  argument list in `exec`.
 
 ## Run the validation test
 
@@ -135,13 +152,26 @@ direct O(N^2) computation.
 bloodflow/
   potentials.py   WCA, Morse, wall forces
   core.py         parameters, cell-list forces, integrator, Result
+  constriction.py constricted channel (throat + ramps)
+  network.py      branching-network geometry and stepping
   analysis.py     transit times, wall residence, clustering
 examples/
   sweep_attraction.py
+  make_video.py, make_constriction_video.py, make_pulsatile_video.py,
+  stacked_attraction_video.py, make_network_video.py
+                  video scripts (need matplotlib + system ffmpeg)
+  videos.ipynb    notebook versions of the five video scripts;
+                  each section renders its frames and encodes the MP4
+                  in the browser with ffmpeg.wasm
+  snapshot_figure.py, residence_time_analysis.py,
+  particle_age_analysis.py, constriction.py
+                  analysis scripts
+demo.ipynb        the sweep, run in the browser, with in-browser MP4 export
 tests/
   test_poiseuille.py
-vendor/ffmpeg/    ffmpeg.wasm 0.12.15 + single-threaded core 0.12.10,
+vendor/ffmpeg/    ffmpeg.wasm 0.12.15 + single-threaded core 0.12.10 (ESM),
                   served same-origin for the in-browser MP4 export
+videos/           pre-rendered videos (pulsatile)
 ```
 
 ## Deliberate limitations (roadmap, not bugs)
