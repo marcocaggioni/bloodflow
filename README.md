@@ -10,6 +10,13 @@ the aggregates move as a plug, so slow near-wall particles get carried
 along instead of lingering. The strength of the effect is measured through
 the distribution of per-particle transit times.
 
+The same particles can also be sheared in planar Couette flow, where the
+shear stress is a genuine response and the flow curve τ(γ̇) can be
+measured — and driven by a pressure gradient instead of an imposed
+profile, so the velocity profile (and the plug in it) emerges from the
+material. See [Flow curves](#flow-curves-couette-rheometry) and
+[Pressure-driven flow](#pressure-driven-flow-the-profile-emerges) below.
+
 ## Model
 
 Overdamped Brownian dynamics of N disks of radius `a` in a channel of
@@ -29,6 +36,14 @@ U(y) = 4*Umax*(y/H)*(1 - y/H),   Umax = dP*H^2/(8*eta*L)
 
 so the pressure drop enters through `Umax` (or equivalently the wall
 shear rate `gamma_w = 4*Umax/H`).
+
+The Couette mode (`bloodflow/couette.py`) replaces the parabola with a
+linear field `U(y) = gamma_dot*(y - H/2)` and measures the shear stress
+the particles exert in response, from the pair virial and from the
+method of planes. The pressure-driven mode (`bloodflow/pressure.py`)
+removes the imposed profile altogether: it imposes the pressure gradient
+`G` and solves the 1D Stokes equation for the solvent velocity each step,
+with the particle drag as a source term, so the profile emerges.
 
 Forces:
 
@@ -92,6 +107,105 @@ the mean near-wall residence time collapses (35 → 4), and clusters grow
 (mean size 1.5 → 15). `frac>3x` is the fraction of completed transits
 slower than 3x the mean; `compl` is the fraction of particles that
 completed a transit (the rest are censored at the end of the run).
+
+## Flow curves: Couette rheometry
+
+In the Poiseuille setup the velocity profile is imposed, so the material
+never gets to decide whether to flow — the defining feature of a
+yield-stress fluid cannot appear, and there is no stress on the other side
+of the equation to measure a flow curve against. The Couette mode fixes
+that: the shear rate is imposed (a linear velocity field) and the shear
+stress is a genuine response of the particles, measured two ways that must
+agree in steady state — the pair virial σ_xy and the method-of-planes
+stress τ(y).
+
+```bash
+python examples/flow_curve.py --plot flow-curve.png   # ~10 min at N=397
+python examples/tc_fit.py --plot tc-fit-loglog.png    # TC model fits
+```
+
+![Flow curve and Casson linearisation](examples/figures/flow-curve.png)
+
+The flow curve works: with no attraction the material is Newtonian
+(τ ∝ γ̇ through the origin); with attraction it gains a yield stress that
+grows with eps. But the shape is **Bingham, not Casson**: the particle
+stress is roughly rate-independent at low rates (a constant offset), so the
+Bingham fit beats Casson (R² 0.9997–0.9999 vs 0.9961–0.9999) and the Casson
+intercept underestimates the yield ~5×. The yield shows only at low rates —
+above γ̇ ≈ 0.5 the stress is identical with or without attraction (the
+aggregates are broken, Ma ≈ 5); eps = 0.32 shows essentially no yield (the
+clusters never percolate; eps = 1.28 percolates, mean cluster 13.7 at
+γ̇ = 0.05). High-rate viscosity ≈ solvent (η_p ≈ 1.01–1.03, all eps).
+
+Fitting the TC model (Caggioni, Trappe & Spicer 2020, J. Rheol. 64(2)
+413–422), τ = σ_y + σ_y√(γ̇/γ̇_c) + η_bg·γ̇, with relative residuals (so
+every decade counts equally), drives γ̇_c to the top of its range — the
+√γ̇ term switches off and TC collapses exactly onto Bingham:
+
+![TC model fits, log-log](examples/figures/tc-fit-loglog.png)
+
+| eps | σ_y (TC / Bingham) | γ̇_c | η_bg | Casson τ_y |
+|---|---|---|---|---|
+| 0 | ~0 | — | 1.04 | 0.0002 |
+| 0.32 | 0.001 | 4×10⁻⁴ | 1.02 | 0.0006 |
+| 0.64 | 0.032 | →∞ | 1.02 | 0.0045 |
+| 1.28 | 0.072 | →∞ | 0.96 | 0.019 |
+
+The toy rejects the √γ̇ component that distinguishes TC from Bingham: its
+aggregates either hold (a rate-independent offset) or break, with no
+gradual fluidisation in between. Note on the numbers: the yields above
+come from relative-residual fits, which respect the low-rate points where
+the yield lives. Ordinary least-squares fits (the values
+`examples/flow_curve.py` prints) weight the high-rate points and
+underestimate the intercept (Bingham τ_y 0.030 / 0.057 for eps 0.64 /
+1.28) — the pressure-driven plug below sides with the relative-residual
+values.
+
+## Pressure-driven flow: the profile emerges
+
+The pressure-driven mode imposes a pressure gradient `G` and lets the
+velocity profile emerge. Each step it solves the 1D Stokes equation for
+the solvent velocity u(y) — pressure gradient driving it, no-slip at the
+walls, the drag from the particles as a source term — and advects the
+particles with the solved u(y). No body force acts on the particles
+themselves (they are neutrally buoyant; the pressure acts on the fluid).
+
+```bash
+python examples/pressure_flow.py   # ~35 min at N=397, 12 points
+```
+
+![Pressure-driven velocity profiles](examples/figures/pressure-flow-profiles.png)
+
+With no attraction the profile is a clean parabola (quadratic fit
+R² = 0.9987; particle and solvent Umax agree to <1%; η_eff 1.16 → 1.06,
+shear-thinning from the WCA collisions), and the transit statistics match
+the imposed-profile runs at the same Umax. With attraction the plug
+emerges in the middle — and its width is exactly what the Couette yield
+stress predicts:
+
+| eps | G | τ_wall | plug half-width (stress) | τ_y / G |
+|---|---|---|---|---|
+| 0.64 | 0.002 | 0.050 | 15.8 | 15.8 |
+| 0.64 | 0.004 | 0.100 | 7.9 | 7.9 |
+| 0.64 | 0.008 | 0.200 | 3.9 | 3.9 |
+| 1.28 | 0.004 | 0.100 | 18.0 | 18.0 |
+| 1.28 | 0.008 | 0.200 | 9.0 | 9.0 |
+
+(Two points are left out: at G = 0.001–0.002 for eps = 1.28 the predicted
+plug is wider than the channel, so it spans it.) The total stress
+ηu′ + σ^p_xy is linear in y with slope −G at every point (R² ≥ 0.999),
+which is the momentum balance the whole construction has to satisfy:
+
+![Total stress profiles](examples/figures/pressure-flow-stress.png)
+
+Two honest caveats. The plug is rounded, not flat-with-a-kink: the
+velocity-based width depends on the threshold, while the stress-based
+width is robust — τ_y/G is an upper bound on the flat region, matched
+exactly by the stress measurement. And below the yield (τ_wall < τ_y) the
+profile creeps rather than stopping outright (centre velocity ~30% of the
+Newtonian value at the same G): with frictionless walls there is nothing
+to hold the plug still, so a true no-flow state would need a wall-friction
+term.
 
 ## Videos
 
@@ -161,9 +275,20 @@ bloodflow/
   core.py         parameters, cell-list forces, integrator, Result
   constriction.py constricted channel (throat + ramps)
   network.py      branching-network geometry and stepping
+  couette.py      planar Couette shear + virial / method-of-planes stress
+  pressure.py     pressure-driven flow: Stokes solve for u(y) each step
   analysis.py     transit times, wall residence, clustering
 examples/
   sweep_attraction.py
+  flow_curve.py   Couette flow curve + Casson / Bingham fits
+                  (reference output: flow-curve.csv)
+  tc_fit.py       TC model fits to the flow curve (relative residuals)
+  pressure_flow.py
+                  pressure-gradient sweep: profiles, plug widths,
+                  stress linearity (reference outputs:
+                  pressure-flow.csv, pressure-flow-profiles.csv)
+  figures/        flow-curve.png, tc-fit-loglog.png,
+                  pressure-flow-profiles.png, pressure-flow-stress.png
   make_video.py, make_constriction_video.py, make_pulsatile_video.py,
   stacked_attraction_video.py, make_network_video.py
                   video scripts (need matplotlib + system ffmpeg)
@@ -176,6 +301,8 @@ examples/
 demo.ipynb        the sweep, run in the browser, with in-browser MP4 export
 tests/
   test_poiseuille.py
+  test_couette.py
+  test_pressure.py
 vendor/ffmpeg/    ffmpeg.wasm 0.12.15 + single-threaded core 0.12.10 (ESM),
                   served same-origin for the in-browser MP4 export
 videos/           pre-rendered videos (all five notebook versions,
@@ -185,8 +312,11 @@ videos/           pre-rendered videos (all five notebook versions,
 ## Deliberate limitations (roadmap, not bugs)
 
 - 2D disks, rigid, free-draining (no hydrodynamic interactions).
-- Steady flow only; the heartbeat version (pulsatile pressure drop, gel
+- Steady gradients only; the heartbeat version (pulsatile pressure drop, gel
   forming in diastole and plug moving in systole) is the natural next step.
+- Below the yield stress the pressure-driven plug creeps instead of
+  stopping outright — the walls are frictionless, so a true no-flow state
+  would need a wall-friction term. The plug edge is rounded, not a kink.
 - Morse attraction stands in for depletion; an Asakura-Oosawa potential
   (range = depletant size, depth ∝ depletant concentration) would make
   the depletion hypothesis literal.
