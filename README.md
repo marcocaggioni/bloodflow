@@ -95,7 +95,14 @@ completed a transit (the rest are censored at the end of the run).
 
 ## Videos
 
+All five video scripts have a rendered example below (the notebook versions, as produced by [`examples/videos.ipynb`](examples/videos.ipynb) — see the trims there; the full-scale scripts give longer runs):
+
+- [Poiseuille vs plug](videos/bloodflow-poiseuille-vs-plug.mp4) — side by side, no attraction vs strong attraction, 8 s at 25 fps.
+- [Constriction](videos/bloodflow-constriction.mp4) — same setup through a 10-wide throat, 8 s at 25 fps.
 - [Pulsatile flow](videos/bloodflow-pulsatile.mp4) — sinusoidal pressure drop, no reversal: 12 beats at the same mean flow as the steady run, with a waveform strip marking beat phase and Mason number. The plug breathes but survives (phase-averaged cluster fraction ~0.92 at systole vs ~0.97 at diastole).
+- [Pulsatile flow, notebook version](videos/bloodflow-pulsatile-notebook.mp4) — 4 beats / 8 s, as produced by `examples/videos.ipynb` (cluster fraction 0.90 at systole vs 0.91 at diastole).
+- [Attraction ladder](videos/stacked-attraction-video.mp4) — four strengths stacked (eps 0, 0.32, 0.64, 1.28), 4 s at 25 fps.
+- [Branching network](videos/bloodflow-network.mp4) — 1→2→4→8→4→2→1 ladder, no attraction vs strong attraction, 4 s at 25 fps.
 
 Notebook versions of all five video scripts live in [`examples/videos.ipynb`](examples/videos.ipynb): Poiseuille vs plug, constriction, pulsatile, the stacked attraction ladder, and the branching network. Each section renders its frames and encodes the MP4 in the browser (see below); the runs are trimmed relative to the scripts — fewer seconds, steps, or beats — so they finish in a few minutes in the browser, and each section says exactly how.
 
@@ -171,7 +178,8 @@ tests/
   test_poiseuille.py
 vendor/ffmpeg/    ffmpeg.wasm 0.12.15 + single-threaded core 0.12.10 (ESM),
                   served same-origin for the in-browser MP4 export
-videos/           pre-rendered videos (pulsatile)
+videos/           pre-rendered videos (all five notebook versions,
+                  plus the full-scale 12-beat pulsatile)
 ```
 
 ## Deliberate limitations (roadmap, not bugs)
